@@ -1,3 +1,11 @@
+# 0.14.0-rc.1
+
+- Preserve pending minimize/restore transactions across dispatcher failures; recover orphaned hidden windows and reject unsafe cleanup.
+- Add executable-side protocol guards, kernel-managed locking and strict doctor error propagation.
+- Move the context menu to a real menu entry point using documented own-service injection; keep monitor-host ownership valid after removal.
+- Commit Cargo.lock, fix Rust/ShellCheck gates, add backend and lifecycle regressions, and monitor upstream contracts in CI.
+- Document source installation, explicit backend rebuilding, recovery and symmetrical removal.
+
 # Changelog
 
 ## 0.13.7

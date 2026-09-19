@@ -1,170 +1,134 @@
 # Workspace Taskbar
 
-A per-window taskbar plugin for Omarchy 4.0.4. It keeps the built-in `omarchy.bar`, uses Omarchy's scoped AppLibrary for application presentation, and delegates only window-state transactions to a one-shot Rust helper.
+An Omarchy plugin with one button per window, launcher-matched app icons, minimize/restore, Show Desktop, pinned launchers, window previews and a keyboard-accessible context menu. It uses the built-in Omarchy bar and a small one-shot Rust helper.
 
-## Design
+**0.14.0-rc.1** is a release candidate. See [verification](docs/verification/RESULTS.md) for executed checks and remaining graphical acceptance gates. Repository: [48hoursnonstop/workspace-taskbar](https://github.com/48hoursnonstop/workspace-taskbar).
 
-- `TaskbarService.qml` owns the live window model, AppLibrary matching, runtime compatibility probe, and backend queue.
-- `Taskbar.qml` renders one button for every real Hyprland window. There is no default application grouping.
-- `Taskbar.qml` owns the bar-native right-click `KeyboardPanel` and its `PanelKeyCatcher` cursor model.
-- `CapabilityMenu.qml` is intentionally non-visual; the `menu` manifest kind is retained only because Omarchy 4.0.4 uses it to grant the scoped AppLibrary capability.
-- `qml/AppMatcher.js` selects an existing Omarchy DesktopEntry. It never resolves icons itself.
-- `backend/` contains a one-shot Rust CLI for minimize/restore, group-safe state, Show Desktop, recovery, and exact-address window actions.
-- `scripts/doctor.sh` checks the supported public interfaces without modifying Omarchy files.
-- Optional titlebar polish uses only the official `hyprwm/hyprland-plugins` Hyprbars plugin through `hyprpm`.
+## Requirements
 
-The plugin does not replace the bar, modify `/usr/share/omarchy`, start another Quickshell instance, fork Hyprland/Hyprbars, or run a resident backend daemon.
+- Omarchy **4.0.4**, its built-in `omarchy.bar`, Hyprland **0.56.x** (tested on 0.56.2), Quickshell **0.3.1**.
+- Rust **1.89+** with Cargo, `jq`, Bash and Git for installation/building.
+- A running user desktop with working `omarchy-shell` and `hyprctl` IPC.
+- Hyprbars is optional. The plugin works without it.
 
-## Current milestone: 0.13.5
+The backend refuses window mutations outside the reviewed Hyprland dispatcher family. Doctor warns about Omarchy version drift. Updates need a compatibility review; version numbers alone do not guarantee compatibility.
 
-Core behavior:
+## Install
 
-- one actual Hyprland window = one taskbar button;
-- exact-address focus, minimize, restore, close, floating/fullscreen/maximized/pseudo/group actions;
-- stable right-click popups anchored to the clicked instance;
-- a bar-native Show Desktop button: left click toggles Show Desktop and right click uses Omarchy's own per-workspace Dwindle/Scrolling toggle;
-- stable first-seen button ordering and incremental model updates;
-- original workspace name/special-workspace metadata;
-- AppLibrary-only application name/icon presentation;
-- matching by startup class, DesktopEntry id, executable, Steam app id, web-app host, and XDG user overrides;
-- persisted minimize/restore state with atomic replacement and recovery;
-- tiled reattachment on restore for Hyprland 0.56.x;
-- active/minimized/urgent/pressed taskbar states themed through Omarchy shared UI tokens.
-- taskbar control/action glyphs use a small bundled Lucide SVG subset, normalized to white luminance before Qt MultiEffect tinting so menu/control pixels follow Omarchy semantic colors; Show Desktop itself stays on Omarchy’s native bar-glyph path for exact built-in alignment/color, and application identity icons still come exclusively from AppLibrary;
-- context-menu workspace picker using the same 1-5 plus live 6-10 workspace policy as Omarchy's built-in workspace widget;
-- exact-address move-to-workspace without following/focusing the moved window;
-- one-click Move here for windows on another workspace;
-- exact-address Omarchy-style Pop out / Return popped window, tracked with Hyprland's static `pop` tag;
-- taskbar tooltips include the window's current workspace and live compositor state;
-- window buttons expose Qt accessibility semantics and keyboard activation/context-menu access;
-- context menus use Omarchy's keyboard-focus-owning panel path and support Up/Down/Left/Right, Tab/Shift+Tab, Enter/Space, and Escape with visible Omarchy cursor treatment;
-- matched AppLibrary applications expose **Open new window** without bypassing Omarchy's launcher path;
-- **Move to workspace…** includes Omarchy's native Scratchpad (`special:scratchpad`) alongside the numeric workspaces;
-- multi-monitor sessions expose **Move to monitor…** using Quickshell's native `Hyprland.monitors` model and an exact-address Hyprland 0.56 Lua dispatcher;
-- multi-monitor tooltips identify the window's current output without adding monitor chrome in single-monitor sessions;
-- matched applications can be **pinned to the taskbar** using only their Omarchy AppLibrary DesktopEntry id;
-- pinned launchers appear only while that application has no matched live window, preserving the invariant that every real window keeps its own independent taskbar button;
-- pinned launcher order persists in `$XDG_CONFIG_HOME/dev.becerromarchy.workspace-taskbar/pins.json` and can be adjusted from the launcher's keyboard-accessible context menu;
-- hovering a live window button briefly opens a compositor-native single-frame preview using Quickshell `ScreencopyView`; the capture source exists only while the preview surface is visible, never runs as a live feed, and yields to context menus/popouts through Omarchy's bar coordinator;
-
-Bundled Lucide assets are licensed under the upstream ISC/MIT terms in `icons/lucide/LICENSE`.
-
-Optional Hyprbars integration:
-
-- official `https://github.com/hyprwm/hyprland-plugins` only;
-- installed, enabled and reloaded only through `hyprpm`;
-- ABI matching remains Hyprpm's responsibility;
-- one managed config: `~/.config/hypr/workspace-taskbar-hyprbars.lua`;
-- one marker-delimited hook in user-owned `~/.config/hypr/hyprland.lua`;
-- guarded Lua config, so a missing Hyprbars plugin does not create Hyprland config errors;
-- theme-derived titlebar colors from Omarchy's current `colors.toml`;
-- titlebar buttons: minimize, maximize/restore, and close;
-- double-click titlebar: toggle maximized;
-- exact-address titlebar actions, so focus changes cannot redirect maximize/close;
-- inactive title text follows the Omarchy muted color;
-- real fullscreen and windows advertising Wayland content type `game` automatically suppress Hyprbars;
-- titlebar colors are reread on Hyprland reload using the same semantic-role precedence as Omarchy 4.0.4, so normal theme switches retheme Hyprbars automatically;
-- no titlebar right-click workaround or fork-dependent `...` button;
-- ownership state records whether this project added the official repository or enabled Hyprbars, so uninstall does not blindly remove a pre-existing dependency.
-
-The taskbar remains fully functional without Hyprbars.
-
-## XDG paths
-
-```text
-source:   ~/.config/omarchy/plugins/dev.becerromarchy.workspace-taskbar/
-config:   $XDG_CONFIG_HOME/dev.becerromarchy.workspace-taskbar/
-          ├── overrides.json   (optional AppLibrary match overrides)
-          └── pins.json        (taskbar-pinned AppLibrary DesktopEntry ids)
-backend:  $XDG_DATA_HOME/dev.becerromarchy.workspace-taskbar/bin/workspace-taskbar-backend
-state:    $XDG_STATE_HOME/dev.becerromarchy.workspace-taskbar/restore-v1.json
-cache:    $XDG_CACHE_HOME/dev.becerromarchy.workspace-taskbar/
-runtime:  $XDG_RUNTIME_DIR/dev.becerromarchy.workspace-taskbar/
-```
-
-Optional Hyprbars files:
-
-```text
-~/.config/hypr/workspace-taskbar-hyprbars.lua
-$XDG_DATA_HOME/dev.becerromarchy.workspace-taskbar/bin/workspace-taskbar-hyprbars-action
-$XDG_STATE_HOME/dev.becerromarchy.workspace-taskbar/hyprbars-ownership.env
-```
-
-Application matching overrides are optional:
-
-```json
-{
-  "matches": {
-    "window-class": "desktop-entry-id"
-  }
-}
-```
-
-Save that as `$XDG_CONFIG_HOME/dev.becerromarchy.workspace-taskbar/overrides.json`. The value identifies an entry already exposed by Omarchy AppLibrary; it does not provide a custom icon or display name.
-
-## Validation
-
-Source-only checks:
+Review the source first. Omarchy adds plugins disabled; build the helper before enabling this one.
 
 ```bash
-tests/smoke/static.sh
-omarchy plugin validate .
+omarchy plugin add https://github.com/48hoursnonstop/workspace-taskbar.git
+cd ~/.config/omarchy/plugins/dev.becerromarchy.workspace-taskbar
+./scripts/install.sh
 ```
 
-The backend build is a separate runtime step. `scripts/build-backend.sh` uses no `sudo`; Cargo output stays under XDG cache and the installed executable goes under XDG data instead of the watched plugin source tree.
+The installer validates the manifest, builds from committed `Cargo.lock`, checks the environment, enables the widget and runs doctor. It does not install system packages or require root. Missing dependencies are reported explicitly.
 
-0.12.2 adds delayed, single-frame window previews entirely in QML using Quickshell's Hyprland toplevel mapping and `ScreencopyView`. Capture is created only while the hover card is open and `live` remains disabled, so there is no resident preview stream. The one-shot backend stays at `0.7.0` / protocol `4`; updating from 0.11.0 requires no Rust rebuild or Hyprbars setup rerun. Agent/design skills remain development methodology only and are not installed or shipped by the plugin.
+For a source archive, extract its `dev.becerromarchy.workspace-taskbar/` directory under `~/.config/omarchy/plugins/`, then run the same installer. Keep an existing checkout backed up before replacing it. Archive installations do not have Git update history; use a Git checkout for Omarchy-managed updates.
 
-## Optional Hyprbars setup
-
-Run only after the core taskbar is healthy:
+Place the widget as desired:
 
 ```bash
-./scripts/setup-hyprbars.sh
+omarchy bar move dev.becerromarchy.workspace-taskbar --section left --after omarchy.workspaces
 ```
 
-Status:
+## Use
+
+- Click the active window to minimize it; click an inactive window to focus it; click a minimized window to restore it.
+- Right-click an icon for window actions. Arrow keys navigate; Enter/Space activates; Escape closes.
+- Show Desktop hides the current workspace as a reversible batch. Its right-click action uses Omarchy's workspace layout toggle.
+- Pin an application from its context menu. Its launcher appears when no matching live window is present; live windows always retain separate buttons.
+- Hover a live window for a delayed, single-frame compositor preview.
+- Minimized group members restore together where Hyprland treats their group as one unit. Exact tiled left/right positions are intentionally not reconstructed.
+
+Names and app icons come only from Omarchy AppLibrary. An unmatched app or a failed AppLibrary capability probe degrades explicitly; there is no competing icon resolver.
+
+## Update
 
 ```bash
-./scripts/setup-hyprbars.sh --status
+cd ~/.config/omarchy/plugins/dev.becerromarchy.workspace-taskbar
+./scripts/update.sh
 ```
 
-Remove only this project's Hyprbars integration:
+For noninteractive source-update confirmation, pass `--yes`. The wrapper records current versions, delegates Git updates to `omarchy plugin update`, validates source, rebuilds the backend, rescans and runs doctor. Calling Omarchy's updater directly requires running `./scripts/build-backend.sh` afterward.
+
+Every QML/Hyprbars backend call carries the expected protocol. The invoked executable checks that protocol before state changes, even if the binary was replaced after a health probe. Protocol **5**, backend **0.8.0**, state schema **1**. Legacy schema-1 records remain readable. Finish recovery before downgrading to an older backend, which cannot understand pending transactions.
+
+## Diagnose and recover
 
 ```bash
-./scripts/setup-hyprbars.sh --remove
-```
-
-The setup script never installs Arch packages or uses `sudo`. It checks for Hyprpm's build dependencies and stops if they are missing.
-
-## Runtime IPC
-
-```bash
+./scripts/doctor.sh
+./scripts/doctor.sh --pre-enable
 omarchy-shell workspace-taskbar status
-omarchy-shell workspace-taskbar model
 omarchy-shell workspace-taskbar refreshApps
-omarchy-shell workspace-taskbar showDesktop
 omarchy-shell workspace-taskbar restoreLast
 omarchy-shell workspace-taskbar restoreAll
 omarchy-shell workspace-taskbar recover
 ```
 
-## Compatibility baseline
+The shell recovery commands enqueue work; inspect `status` afterward for completion/errors. For synchronous recovery when the shell is unavailable:
 
-The reviewed baseline is Omarchy `v4.0.4`, Hyprland `0.56.2` and the official Hyprbars Lua API exposed through Hyprpm. Exact Omarchy compatibility notes are recorded in `compat/upstream.json`. `scripts/doctor.sh` reports version drift rather than patching upstream automatically.
+```bash
+~/.local/share/dev.becerromarchy.workspace-taskbar/bin/workspace-taskbar-backend --protocol 5 recover
+```
 
-### Preview runtime note
+Transactions persist their original state before dispatch. Interrupted operations keep a pending record so recovery can finish. Closed/reused clients and manually moved completed records are reconciled. Orphaned windows on the private hidden workspace are rescued onto the active normal workspace; without their original record, their original workspace/geometry cannot be reconstructed. Corrupt or incompatible state is retained and reported; it is never silently discarded. Back up that file before repairing it.
 
-Version 0.12.2 fixes the initial preview implementation by using Quickshell 0.3.1's `paintCursor` property and by normalizing Hyprland window addresses before resolving the associated Wayland toplevel.
+An `UPSTREAM_APP_LIBRARY_CAPABILITY_BROKEN` diagnostic requires reviewing the upstream capability contract. `WindowMenu.qml` uses the host's own-service injection and does not request a second shell facade; this avoids the Omarchy 4.0.4 model-delivered menu capability bug while keeping application metadata exclusively in the service.
 
+## Optional Hyprbars
 
-## 0.13.1 compatibility reset
+```bash
+./scripts/setup-hyprbars.sh
+./scripts/setup-hyprbars.sh --status
+./scripts/setup-hyprbars.sh --remove
+```
 
-Version 0.13.1 deliberately returns the taskbar UI/model behavior to the validated 0.12.2 baseline. The rejected 0.13.0 multi-instance clustering, number badges, `Window N of M` metadata, and `App windows` submenu are not part of the plugin.
+Only official `hyprwm/hyprland-plugins`, managed by `hyprpm`, is supported. Setup checks prerequisites and ownership, guards configuration when Hyprbars is absent, verifies config errors and rolls back its changes on failure. Buttons provide minimize, maximize and close. There is no empty-titlebar right-click patch or `...` workaround.
 
-`./scripts/doctor.sh` also checks the runtime taskbar model against Hyprland's live clients plus the backend's minimized records so a stale/ghost taskbar row is reported explicitly.
+## Uninstall
 
+```bash
+cd ~/.config/omarchy/plugins/dev.becerromarchy.workspace-taskbar
+./scripts/uninstall.sh
+```
 
-### Theme color contract for taskbar-owned icons
+This disables the UI, recovers windows, verifies none remain hidden, removes owned Hyprbars integration and runtime files, then delegates Git checkout removal to Omarchy. Pass `--yes` for Omarchy's removal confirmation. A manual source directory is moved to a timestamped backup under `~/.local/share/omarchy-plugin-backups/`.
 
-Bar controls follow Omarchy `WidgetButton`: `foreground: bar ? bar.barForeground : Color.foreground`. Show Desktop deliberately does not opt into an accent/active color; its main glyph and right-click cue both use that native bar foreground. Menu action glyphs follow `Color.menu.text`, `Color.menu.selectedText`, and semantic `Color.urgent` for Close. Lucide SVGs are rendered as monochrome masks: the raw `currentColor` source resolves black in Qt Image, so `LucideIcon.qml` applies `brightness: 1.0` before `colorization: 1.0`; the target color still comes entirely from the Omarchy theme role supplied by the caller.
+Missing backend, failed disable, unresolved records or failed compositor queries stop cleanup with state retained. Fix the error and rerun. Pins and match overrides are preserved as user preferences. Do not run `omarchy plugin remove` alone while the plugin has minimized windows: Omarchy does not run uninstall hooks.
+
+## Files
+
+| Purpose | Location (XDG defaults) |
+|---|---|
+| Source | `~/.config/omarchy/plugins/dev.becerromarchy.workspace-taskbar/` |
+| Helper | `~/.local/share/dev.becerromarchy.workspace-taskbar/bin/` |
+| Restore journal | `~/.local/state/dev.becerromarchy.workspace-taskbar/restore-v1.json` |
+| Cargo output | `~/.cache/dev.becerromarchy.workspace-taskbar/cargo-target/` |
+| Session lock | `$XDG_RUNTIME_DIR/dev.becerromarchy.workspace-taskbar/transaction.lock` |
+| Pins / overrides | `~/.config/dev.becerromarchy.workspace-taskbar/` |
+
+Runtime, cache and preferences honor their corresponding XDG variables. Generated files do not enter the recursively watched plugin tree. Matching overrides select an existing DesktopEntry, for example `{"matches":{"window-class":"desktop-entry-id"}}` in `overrides.json`.
+
+## Development
+
+```bash
+export CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/dev.becerromarchy.workspace-taskbar/cargo-target"
+cargo fmt --manifest-path backend/Cargo.toml -- --check
+cargo clippy --manifest-path backend/Cargo.toml --locked -- -D warnings
+cargo test --manifest-path backend/Cargo.toml --locked
+cargo build --manifest-path backend/Cargo.toml --locked --release
+shellcheck scripts/*.sh tests/smoke/*.sh tests/acceptance/*.sh
+tests/smoke/static.sh
+python3 tests/smoke/lifecycle.test.py
+TASKBAR_TEST_BINARY="$CARGO_TARGET_DIR/release/workspace-taskbar-backend" python3 tests/backend/test_transactions.py
+omarchy plugin validate .
+./scripts/check-qml.sh
+```
+
+CI executes these source/backend checks; the scheduled upstream job flags contract changes for review. Graphical acceptance belongs in a disposable Omarchy VM: see [acceptance procedure](tests/acceptance/README.md). A green hosted CI run alone is not graphical release certification.
+
+From a clean, committed checkout, `./scripts/package.sh /path/to/output` creates a source tar and SHA-256 file from Git. No compiled executable is downloaded by the installer.
+
+MIT licensed. Bundled Lucide control glyphs retain their upstream license in `icons/lucide/LICENSE`.

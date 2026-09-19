@@ -52,7 +52,11 @@ pub fn normalize_address(value: &str) -> Result<String> {
         address = rest.to_string();
     }
 
-    if address.is_empty() || !address.chars().all(|character| character.is_ascii_hexdigit()) {
+    if address.is_empty()
+        || !address
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
         bail!("invalid Hyprland window address");
     }
 
@@ -72,7 +76,7 @@ fn output(args: &[&str]) -> Result<String> {
         ));
     }
 
-    Ok(String::from_utf8(result.stdout).context("hyprctl returned non-UTF8 output")?)
+    String::from_utf8(result.stdout).context("hyprctl returned non-UTF8 output")
 }
 
 pub fn version() -> Result<String> {
@@ -82,6 +86,14 @@ pub fn version() -> Result<String> {
         .unwrap_or_default()
         .trim()
         .to_string())
+}
+
+pub fn ensure_compatible() -> Result<()> {
+    let installed = version()?;
+    if !installed.starts_with("Hyprland 0.56.") {
+        bail!("unsupported Hyprland version: {installed}; reviewed dispatcher API is 0.56.x");
+    }
+    Ok(())
 }
 
 pub fn clients() -> Result<Vec<Client>> {
@@ -252,7 +264,6 @@ pub fn reattach_tiled(address: &str) -> Result<()> {
     wait_for_floating(address, true)?;
     set_floating(address, false)?;
     wait_for_floating(address, false)?;
-    thread::sleep(Duration::from_millis(12));
     Ok(())
 }
 
@@ -402,7 +413,6 @@ pub fn action(action: &str, address: &str, argument: Option<&str>) -> Result<()>
 
     dispatch(&expression)
 }
-
 
 #[cfg(test)]
 mod tests {

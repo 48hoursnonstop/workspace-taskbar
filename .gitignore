@@ -3,3 +3,5 @@
 /.vscode/
 *.swp
 *.tmp
+__pycache__/
+*.pyc

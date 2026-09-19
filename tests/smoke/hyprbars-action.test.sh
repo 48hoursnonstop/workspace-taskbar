@@ -44,8 +44,8 @@ export CALL_LOG="$LOG"
 "$ROOT/scripts/hyprbars-action.sh" maximize
 "$ROOT/scripts/hyprbars-action.sh" close
 
-grep -Fqx 'backend:minimize 0xabc123' "$LOG"
-grep -Fqx 'hyprctl:hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle", window = "address:0xabc123" })' "$LOG"
-grep -Fqx 'hyprctl:hl.dsp.window.close({ window = "address:0xabc123" })' "$LOG"
+grep -Fqx 'backend:--protocol 5 minimize 0xabc123' "$LOG"
+grep -Fqx 'backend:--protocol 5 window-action maximized-toggle 0xabc123' "$LOG"
+grep -Fqx 'backend:--protocol 5 window-action close 0xabc123' "$LOG"
 
 printf 'hyprbars action smoke ok\n'

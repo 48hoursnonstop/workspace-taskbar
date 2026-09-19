@@ -1,60 +1,50 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 PLUGIN_ID=dev.becerromarchy.workspace-taskbar
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-: "${XDG_DATA_HOME:=$HOME/.local/share}"
-: "${XDG_STATE_HOME:=$HOME/.local/state}"
-: "${XDG_CACHE_HOME:=$HOME/.cache}"
-: "${XDG_RUNTIME_DIR:=/run/user/$UID}"
-BIN="$XDG_DATA_HOME/$PLUGIN_ID/bin/workspace-taskbar-backend"
-
+CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}
+DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
+STATE_HOME=${XDG_STATE_HOME:-$HOME/.local/state}
+CACHE_HOME=${XDG_CACHE_HOME:-$HOME/.cache}
+BIN="$DATA_HOME/$PLUGIN_ID/bin/workspace-taskbar-backend"
+[[ $# == 0 || ( $# == 1 && $1 == --yes ) ]] || { echo 'usage: uninstall.sh [--yes]' >&2; exit 2; }
+[[ $(realpath "$ROOT") == "$(realpath -m "$CONFIG_HOME/omarchy/plugins/$PLUGIN_ID")" ]] || {
+  echo 'Run uninstall from the installed plugin directory.' >&2; exit 2;
+}
+for tool in jq hyprctl omarchy omarchy-shell; do
+  command -v "$tool" >/dev/null || { echo "Missing required command: $tool" >&2; exit 2; }
+done
+# Stop new UI requests before recovery; any failure keeps restore state intact.
+omarchy plugin disable "$PLUGIN_ID"
+omarchy-shell shell rescanPlugins >/dev/null
 if [[ -x $BIN ]]; then
-  echo "Restoring plugin-managed windows..."
-  "$BIN" recover >/dev/null
-
-  if command -v jq >/dev/null; then
-    doctor_json=$($BIN doctor-json)
-    if [[ $(jq -r '.ok // false' <<<"$doctor_json") != true ]]; then
-      echo "Refusing cleanup because project-hidden windows still require recovery:" >&2
-      jq -r '.strandedError // "unknown recovery error"' <<<"$doctor_json" >&2
-      exit 3
-    fi
-  else
-    echo "jq is required to verify that no project-hidden windows remain." >&2
-    exit 2
-  fi
+  "$BIN" --protocol 5 recover
+  doctor_json=$("$BIN" --protocol 5 doctor-json)
+  jq -e '.ok == true and .records == 0' <<<"$doctor_json" >/dev/null
 fi
-
-if [[ -x "$ROOT/scripts/setup-hyprbars.sh" ]]; then
-  "$ROOT/scripts/setup-hyprbars.sh" --remove
+clients=$(hyprctl -j clients)
+jq -e 'type == "array" and all(.[]; .workspace.name != "special:becerromarchy-workspace-taskbar" and .workspace.name != "becerromarchy-workspace-taskbar")' <<<"$clients" >/dev/null || {
+  echo 'Hidden windows remain. Rebuild the backend and run recover; all restore state has been retained.' >&2; exit 3;
+}
+if [[ ! -x $BIN && -f "$STATE_HOME/$PLUGIN_ID/restore-v1.json" ]]; then
+  jq -e '.records | length == 0' "$STATE_HOME/$PLUGIN_ID/restore-v1.json" >/dev/null || {
+    echo 'Backend missing with unresolved restore records. Rebuild before uninstalling.' >&2; exit 3;
+  }
 fi
-
-omarchy plugin disable "$PLUGIN_ID" 2>/dev/null || true
-omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
-
-rm -rf -- \
-  "$XDG_DATA_HOME/$PLUGIN_ID" \
-  "$XDG_STATE_HOME/$PLUGIN_ID" \
-  "$XDG_CACHE_HOME/$PLUGIN_ID" \
-  "$XDG_RUNTIME_DIR/$PLUGIN_ID"
-
-config_errors=$(hyprctl configerrors 2>/dev/null || true)
-if [[ -n $config_errors ]]; then
-  echo "Hyprland reports configuration errors after runtime cleanup:" >&2
-  printf '%s\n' "$config_errors" >&2
-  exit 4
+"$ROOT/scripts/setup-hyprbars.sh" --remove
+errors=$(hyprctl configerrors)
+[[ -z $errors ]] || { printf 'Hyprland config errors: %s\n' "$errors" >&2; exit 4; }
+omarchy-shell shell ping >/dev/null
+# No mutations remain after this point; preserve the lock inode until all old
+# processes have exited. It is ephemeral and the session cleans it up.
+rm -rf -- "${DATA_HOME:?}/${PLUGIN_ID:?}" "${STATE_HOME:?}/${PLUGIN_ID:?}" "${CACHE_HOME:?}/${PLUGIN_ID:?}"
+if [[ -d "$ROOT/.git" ]]; then
+  omarchy plugin remove "$PLUGIN_ID" "$@"
+else
+  backup="$DATA_HOME/omarchy-plugin-backups/$PLUGIN_ID-$(date +%Y%m%d-%H%M%S)-$$"
+  mkdir -p "$(dirname "$backup")"
+  mv -- "$ROOT" "$backup"
+  printf 'Source backed up to %s\n' "$backup"
+  omarchy-shell shell rescanPlugins >/dev/null
 fi
-
-if ! omarchy-shell shell ping >/dev/null 2>&1; then
-  echo "Omarchy shell health check failed after runtime cleanup." >&2
-  exit 5
-fi
-
-cat <<MSG
-Runtime integration for $PLUGIN_ID was removed safely.
-The source checkout was left untouched at:
-  $ROOT
-Use Omarchy's official plugin removal command if you also want to remove that checkout:
-  omarchy plugin remove $PLUGIN_ID
-MSG
+printf 'Removed %s. Application pins/overrides are preserved in %s/%s.\n' "$PLUGIN_ID" "$CONFIG_HOME" "$PLUGIN_ID"

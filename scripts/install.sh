@@ -3,7 +3,7 @@ set -euo pipefail
 
 PLUGIN_ID=dev.becerromarchy.workspace-taskbar
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-EXPECTED="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+EXPECTED="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/$PLUGIN_ID"
 
 command -v omarchy >/dev/null || { echo "Omarchy CLI not found." >&2; exit 2; }
 
@@ -23,6 +23,7 @@ fi
 
 omarchy plugin validate "$ROOT"
 "$ROOT/scripts/build-backend.sh"
+"$ROOT/scripts/doctor.sh" --pre-enable
 omarchy-shell shell rescanPlugins
 omarchy plugin enable "$PLUGIN_ID" --section left --index 1
 "$ROOT/scripts/doctor.sh"

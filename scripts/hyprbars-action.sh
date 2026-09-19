@@ -15,18 +15,19 @@ command -v jq >/dev/null 2>&1 || exit 0
 # focus change cannot redirect maximize/close to a different client.
 address=$(hyprctl activewindow -j 2>/dev/null | jq -er '.address | select(type == "string" and length > 0)' 2>/dev/null || true)
 [[ -n $address ]] || exit 0
-selector="address:$address"
 
 case "$action" in
   minimize)
     [[ -x $BIN ]] || exit 0
-    exec "$BIN" minimize "$address"
+    exec "$BIN" --protocol 5 minimize "$address"
     ;;
   maximize)
-    exec hyprctl dispatch "hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\", window = \"$selector\" })"
+    [[ -x $BIN ]] || exit 1
+    exec "$BIN" --protocol 5 window-action maximized-toggle "$address"
     ;;
   close)
-    exec hyprctl dispatch "hl.dsp.window.close({ window = \"$selector\" })"
+    [[ -x $BIN ]] || exit 1
+    exec "$BIN" --protocol 5 window-action close "$address"
     ;;
   *)
     printf 'usage: %s {minimize|maximize|close}\n' "${0##*/}" >&2

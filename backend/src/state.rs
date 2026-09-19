@@ -28,6 +28,10 @@ pub struct RestoreRecord {
     pub initial_title: String,
     #[serde(default)]
     pub pid: i64,
+    // A compositor transaction may have applied only some of its dispatches.
+    // Keep its record even when the window is no longer on the hidden workspace.
+    #[serde(default)]
+    pub pending: bool,
 }
 
 impl RestoreRecord {
@@ -62,6 +66,7 @@ impl RestoreRecord {
             title: client.title.clone(),
             initial_title: client.initial_title.clone(),
             pid: client.pid,
+            pending: true,
         }
     }
 
@@ -106,8 +111,7 @@ pub fn load() -> Result<State> {
         return Ok(State::default());
     }
 
-    let data = fs::read_to_string(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let data = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     let state: State = serde_json::from_str(&data).context("parsing restore state")?;
 
     if state.schema_version != STATE_SCHEMA_VERSION {
@@ -136,10 +140,23 @@ pub fn save(state: &State) -> Result<()> {
     Ok(())
 }
 
-
 pub struct StateLock {
-    path: PathBuf,
+    _file: fs::File,
 }
+
+#[derive(Debug)]
+pub struct Busy;
+
+impl std::fmt::Display for Busy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "another workspace-taskbar backend action is already running"
+        )
+    }
+}
+
+impl std::error::Error for Busy {}
 
 impl StateLock {
     pub fn acquire() -> Result<Self> {
@@ -147,40 +164,20 @@ impl StateLock {
             .map(PathBuf::from)
             .context("XDG_RUNTIME_DIR is unavailable")?;
         let directory = base.join(PLUGIN_ID);
-        let path = directory.join("backend.lock");
+        let path = directory.join("transaction.lock");
         fs::create_dir_all(&directory)?;
-
-        for _ in 0..2 {
-            match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(mut file) => {
-                    writeln!(file, "{}", std::process::id())?;
-                    file.sync_all()?;
-                    return Ok(Self { path });
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let stale = fs::read_to_string(&path)
-                        .ok()
-                        .and_then(|value| value.trim().parse::<u32>().ok())
-                        .map(|pid| !PathBuf::from(format!("/proc/{pid}")).exists())
-                        .unwrap_or(true);
-
-                    if stale {
-                        let _ = fs::remove_file(&path);
-                        continue;
-                    }
-
-                    anyhow::bail!("another workspace-taskbar backend action is already running");
-                }
-                Err(error) => return Err(error.into()),
-            }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)?;
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(fs::TryLockError::WouldBlock) => return Err(Busy.into()),
+            Err(error) => return Err(error.into()),
         }
-
-        anyhow::bail!("could not acquire backend state lock")
-    }
-}
-
-impl Drop for StateLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        // Never unlink the lock inode: the kernel releases it on close/crash.
+        Ok(Self { _file: file })
     }
 }

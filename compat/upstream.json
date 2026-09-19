@@ -1,5 +1,5 @@
 {
-  "reviewedOn": "2026-09-18",
+  "reviewedOn": "2026-09-19",
   "omarchy": {
     "baseline": "4.0.4",
     "tag": "v4.0.4",
@@ -43,7 +43,9 @@
       "hl.dsp.window.pin",
       "hl.dsp.group.toggle",
       "hl.dsp.window.alter_zorder"
-    ]
+    ],
+    "testedVersion": "0.56.2",
+    "supportedApi": "0.56.x"
   },
   "hyprbars": {
     "required": false,
@@ -57,6 +59,7 @@
     ],
     "titlebarButtons": [
       "minimize",
+      "maximize",
       "close"
     ],
     "emptyTitlebarRightClick": false

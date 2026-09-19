@@ -74,10 +74,10 @@ grep -Fq 'REPO_ADDED_BY_PROJECT=1' "$XDG_STATE_HOME/dev.becerromarchy.workspace-
 grep -Fq 'PLUGIN_ENABLED_BY_PROJECT=1' "$XDG_STATE_HOME/dev.becerromarchy.workspace-taskbar/hyprbars-ownership.env"
 
 "$ROOT/scripts/setup-hyprbars.sh" --remove >/dev/null
-! test -e "$HOME/.config/hypr/workspace-taskbar-hyprbars.lua"
-! test -e "$XDG_DATA_HOME/dev.becerromarchy.workspace-taskbar/bin/workspace-taskbar-hyprbars-action"
-! test -e "$XDG_STATE_HOME/dev.becerromarchy.workspace-taskbar/hyprbars-ownership.env"
-! grep -Fq -- '-- >>> dev.becerromarchy.workspace-taskbar:hyprbars >>>' "$HOME/.config/hypr/hyprland.lua"
-! test -e "$MOCK_STATE/repo"
+if test -e "$HOME/.config/hypr/workspace-taskbar-hyprbars.lua"; then echo "Forbidden condition detected" >&2; exit 1; fi
+if test -e "$XDG_DATA_HOME/dev.becerromarchy.workspace-taskbar/bin/workspace-taskbar-hyprbars-action"; then echo "Forbidden condition detected" >&2; exit 1; fi
+if test -e "$XDG_STATE_HOME/dev.becerromarchy.workspace-taskbar/hyprbars-ownership.env"; then echo "Forbidden condition detected" >&2; exit 1; fi
+if grep -Fq -- '-- >>> dev.becerromarchy.workspace-taskbar:hyprbars >>>' "$HOME/.config/hypr/hyprland.lua"; then echo "Forbidden condition detected" >&2; exit 1; fi
+if test -e "$MOCK_STATE/repo"; then echo "Forbidden condition detected" >&2; exit 1; fi
 
 printf 'hyprbars setup smoke ok\n'

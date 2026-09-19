@@ -19,7 +19,17 @@ fn snapshot_json(state: &state::State) -> serde_json::Value {
 
 fn run() -> Result<serde_json::Value> {
     let mut args = std::env::args().skip(1);
-    let command = args.next().unwrap_or_else(|| "help".to_string());
+    let mut command = args.next().unwrap_or_else(|| "help".to_string());
+    if command == "--protocol" {
+        let expected = args.next().unwrap_or_default();
+        if expected != protocol::PROTOCOL_VERSION.to_string() {
+            bail!(
+                "Backend update required: expected protocol {expected}, backend protocol {}",
+                protocol::PROTOCOL_VERSION
+            );
+        }
+        command = args.next().unwrap_or_else(|| "help".to_string());
+    }
 
     if command == "version-json" {
         return Ok(json!({
@@ -50,7 +60,16 @@ fn run() -> Result<serde_json::Value> {
         }));
     }
 
-    let _state_lock = state::StateLock::acquire()?;
+    if !matches!(command.as_str(), "snapshot" | "reconcile" | "doctor-json") {
+        hypr::ensure_compatible()?;
+    }
+    // Doctor observes the atomically replaced state; it must not interrupt UI
+    // transactions by taking their exclusive lock.
+    let _state_lock = if command == "doctor-json" {
+        None
+    } else {
+        Some(state::StateLock::acquire()?)
+    };
     let mut state = state::load()?;
     match command.as_str() {
         "snapshot" | "reconcile" => {
@@ -97,7 +116,17 @@ fn run() -> Result<serde_json::Value> {
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("missing address"))?;
             let argument = args.next();
-            hypr::action(&action, &address, argument.as_deref())?;
+            let moved_hidden = action == "move-workspace"
+                && actions::move_minimized(
+                    &mut state,
+                    &address,
+                    argument
+                        .as_deref()
+                        .ok_or_else(|| anyhow::anyhow!("move-workspace requires workspace"))?,
+                )?;
+            if !moved_hidden {
+                hypr::action(&action, &address, argument.as_deref())?;
+            }
             Ok(json!({
                 "ok": true,
                 "action": action,
@@ -106,12 +135,12 @@ fn run() -> Result<serde_json::Value> {
             }))
         }
         "doctor-json" => {
-            actions::reconcile(&mut state)?;
             let stranded_error = actions::ensure_not_hidden_without_record(&state)
                 .err()
                 .map(|error| error.to_string());
             Ok(json!({
-                "ok": stranded_error.is_none(),
+                "ok": stranded_error.is_none() && !state.records.iter().any(|r| r.pending),
+                "pendingTransactions": state.records.iter().filter(|r| r.pending).count(),
                 "backendVersion": protocol::BACKEND_VERSION,
                 "protocolVersion": protocol::PROTOCOL_VERSION,
                 "stateSchemaVersion": protocol::STATE_SCHEMA_VERSION,
@@ -129,11 +158,19 @@ fn main() -> ExitCode {
     match run() {
         Ok(value) => {
             println!("{}", serde_json::to_string(&value).unwrap());
-            ExitCode::SUCCESS
+            if value.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            }
         }
         Err(error) => {
-            println!("{}", json!({"ok": false, "error": format!("{error:#}")}));
-            ExitCode::from(1)
+            let busy = error.downcast_ref::<state::Busy>().is_some();
+            println!(
+                "{}",
+                json!({"ok": false, "busy": busy, "error": format!("{error:#}")})
+            );
+            ExitCode::from(if busy { 75 } else { 1 })
         }
     }
 }

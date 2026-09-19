@@ -26,7 +26,10 @@ pub fn reconcile(state: &mut State) -> Result<()> {
 
     state.records.retain(|record| {
         live.get(&record.address.to_ascii_lowercase())
-            .map(is_hidden)
+            .map(|client| {
+                (is_hidden(client) || record.pending)
+                    && (record.pid == 0 || record.pid == client.pid)
+            })
             .unwrap_or(false)
     });
 
@@ -37,10 +40,7 @@ pub fn reconcile(state: &mut State) -> Result<()> {
     Ok(())
 }
 
-fn group_targets(
-    client: &hypr::Client,
-    live: &HashMap<String, hypr::Client>,
-) -> Vec<hypr::Client> {
+fn group_targets(client: &hypr::Client, live: &HashMap<String, hypr::Client>) -> Vec<hypr::Client> {
     let mut addresses: HashSet<String> = client
         .grouped
         .iter()
@@ -107,9 +107,22 @@ fn hide_clients(clients: &[hypr::Client]) -> Result<()> {
         }
 
         hypr::move_to_workspace(&client.address, HIDDEN_WORKSPACE)?;
+        hypr::wait_for_workspace(&client.address, HIDDEN_WORKSPACE)?;
     }
 
     Ok(())
+}
+
+fn finish_hide(state: &mut State, clients: &[hypr::Client]) -> Result<()> {
+    for record in &mut state.records {
+        if clients
+            .iter()
+            .any(|client| client.address.eq_ignore_ascii_case(&record.address))
+        {
+            record.pending = false;
+        }
+    }
+    state::save(state)
 }
 
 pub fn minimize(state: &mut State, address: &str) -> Result<Vec<String>> {
@@ -127,6 +140,7 @@ pub fn minimize(state: &mut State, address: &str) -> Result<Vec<String>> {
     let targets = group_targets(client, &live);
     persist_records(state, &targets, None, None)?;
     hide_clients(&targets)?;
+    finish_hide(state, &targets)?;
 
     Ok(targets
         .iter()
@@ -145,6 +159,16 @@ fn restore_records(
 
     let live = by_address()?;
     let mut restored = Vec::new();
+
+    for record in &mut state.records {
+        if records
+            .iter()
+            .any(|target| target.address.eq_ignore_ascii_case(&record.address))
+        {
+            record.pending = true;
+        }
+    }
+    state::save(state)?;
 
     // Phase 1: return every live client to its destination workspace first.
     // Hyprland 0.56.x can otherwise process the follow-up layout state while
@@ -257,16 +281,37 @@ pub fn restore_last(state: &mut State) -> Result<Vec<String>> {
     }
 }
 
+pub fn move_minimized(state: &mut State, address: &str, workspace: &str) -> Result<bool> {
+    reconcile(state)?;
+    let address = hypr::normalize_address(address)?;
+    let group = state
+        .records
+        .iter()
+        .find(|r| r.address.eq_ignore_ascii_case(&address))
+        .map(|r| r.group_key.clone());
+    let Some(group) = group else { return Ok(false) };
+    if workspace == HIDDEN_WORKSPACE || workspace == HIDDEN_WORKSPACE.trim_start_matches("special:")
+    {
+        bail!("the private minimized workspace is not a restore destination");
+    }
+    for record in &mut state.records {
+        if record.group_key == group {
+            record.workspace_name = workspace.to_string();
+            record.workspace_id = workspace.parse().unwrap_or(0);
+        }
+    }
+    state::save(state)?;
+    restore(state, &address, false)?;
+    Ok(true)
+}
+
 pub fn restore_all(state: &mut State) -> Result<Vec<String>> {
     reconcile(state)?;
     let records = state.records.clone();
     restore_records(state, records, None)
 }
 
-pub fn show_desktop_toggle(
-    state: &mut State,
-    workspace_arg: Option<&str>,
-) -> Result<Vec<String>> {
+pub fn show_desktop_toggle(state: &mut State, workspace_arg: Option<&str>) -> Result<Vec<String>> {
     reconcile(state)?;
     let workspace = workspace_arg
         .map(str::to_string)
@@ -325,12 +370,34 @@ pub fn show_desktop_toggle(
     let batch_id = format!("desktop:{workspace}:{stamp}");
     persist_records(state, &targets, Some(batch_id), active)?;
     hide_clients(&targets)?;
+    finish_hide(state, &targets)?;
 
     Ok(targets.into_iter().map(|client| client.address).collect())
 }
 
 pub fn recover(state: &mut State) -> Result<Vec<String>> {
-    restore_all(state)
+    let mut restored = restore_all(state)?;
+    let orphans: Vec<_> = hypr::clients()?.into_iter().filter(is_hidden).collect();
+    if !orphans.is_empty() {
+        let workspace = hypr::active_workspace()?;
+        if workspace.id <= 0 || workspace.name.starts_with("special:") {
+            bail!("select a normal workspace before recovering untracked windows");
+        }
+        // Original geometry/workspace cannot be reconstructed without a record.
+        // Persist an explicit fallback destination before rescuing any orphan.
+        let targets: Vec<_> = orphans
+            .into_iter()
+            .map(|mut client| {
+                client.workspace = workspace.clone();
+                client
+            })
+            .collect();
+        persist_records(state, &targets, None, None)?;
+        let records = state.records.clone();
+        restored.extend(restore_records(state, records, None)?);
+    }
+    ensure_not_hidden_without_record(state)?;
+    Ok(restored)
 }
 
 pub fn ensure_not_hidden_without_record(state: &State) -> Result<()> {

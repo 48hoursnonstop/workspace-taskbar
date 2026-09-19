@@ -2,7 +2,6 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
-import Quickshell.Wayland
 import "qml/AppMatcher.js" as AppMatcher
 
 Item {
@@ -12,7 +11,7 @@ Item {
   property var manifest: null
 
   readonly property string pluginId: "dev.becerromarchy.workspace-taskbar"
-  readonly property int expectedProtocol: 4
+  readonly property int expectedProtocol: 5
   readonly property string home: Quickshell.env("HOME")
   readonly property string dataHome: Quickshell.env("XDG_DATA_HOME") || (home + "/.local/share")
   readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || (home + "/.config")
@@ -28,6 +27,23 @@ Item {
   property bool appLibraryHealthy: false
   property string appLibraryDiagnostic: "Not probed"
   property string lastError: ""
+  property var menuHost: null
+  property bool menuOpened: false
+
+  function windowForAddress(address) {
+    const normalized = normalizedAddress(address)
+    for (let i = 0; i < windowModel.count; i++) {
+      const row = windowModel.get(i)
+      if (row.address === normalized) return JSON.parse(JSON.stringify(row))
+    }
+    return null
+  }
+
+  function activeWindowAddress() {
+    for (let i = 0; i < windowModel.count; i++)
+      if (windowModel.get(i).active) return windowModel.get(i).address
+    return ""
+  }
 
   property var appRows: []
   property var appPresentationById: ({})
@@ -525,7 +541,11 @@ Item {
     if (backendProc.running || activeJob || backendQueue.length === 0) return
     activeJob = backendQueue.shift()
     backendOutput.text = ""
-    backendProc.command = [backendPath].concat(activeJob.args)
+    // The invoked binary checks its own protocol before doing any work. This
+    // also covers replacement between a version probe and the action itself.
+    backendProc.command = activeJob.tag === "version"
+      ? [backendPath, "version-json"]
+      : [backendPath, "--protocol", String(expectedProtocol)].concat(activeJob.args)
     backendProc.running = true
   }
 
@@ -574,7 +594,7 @@ Item {
 
   function backendAction(args, address) {
     if (!backendHealthy || !protocolCompatible) {
-      lastError = "Backend unavailable or protocol mismatch. Run scripts/build-backend.sh"
+      lastError = "Backend update required. Run " + configHome + "/omarchy/plugins/" + pluginId + "/scripts/build-backend.sh"
       return false
     }
 
@@ -669,7 +689,24 @@ Item {
     stdout: SplitParser { onRead: function(line) { backendOutput.text += line } }
     stderr: SplitParser { onRead: function(line) { root.lastError = line } }
 
-    onExited: function(code, status) {
+    // Quickshell 0.3.1 emits runningChanged, but not exited, on FailedToStart.
+    onRunningChanged: {
+      if (running) return
+      const stoppedJob = root.activeJob
+      Qt.callLater(function() {
+        if (!backendProc.running && stoppedJob && root.activeJob === stoppedJob) {
+          if (stoppedJob.address) root.setBusy(stoppedJob.address, false)
+          root.activeJob = null
+          root.backendQueue = []
+          root.busyByAddress = ({})
+          root.rebuildWindows()
+          root.backendHealthy = false
+          root.lastError = "Backend could not start. Run " + root.configHome + "/omarchy/plugins/" + root.pluginId + "/scripts/build-backend.sh"
+        }
+      })
+    }
+
+    onExited: function(code) {
       var job = root.activeJob
       root.activeJob = null
       var obj = null
@@ -679,6 +716,14 @@ Item {
       } catch (e) {
         root.lastError = "Backend returned invalid JSON: " + String(e)
         if (job && (job.tag === "version" || job.tag === "snapshot")) root.backendHealthy = false
+      }
+
+      if (obj && obj.busy === true) {
+        if (job && job.address) root.setBusy(job.address, false)
+        if (job && job.tag === "action") root.lastError = "Window operation busy; try again"
+        snapshotDebounce.restart()
+        root.startNextBackendJob()
+        return
       }
 
       if (code !== 0 && job && (job.tag === "version" || job.tag === "snapshot"))
@@ -730,7 +775,7 @@ Item {
   }
 
   Connections {
-    target: shell && shell.appLibrary ? shell.appLibrary : null
+    target: root.shell && root.shell.appLibrary ? root.shell.appLibrary : null
     function onAppsChanged() { root.probeAppLibrary() }
   }
 
@@ -761,8 +806,12 @@ Item {
   Timer {
     interval: 10000
     repeat: true
-    running: root.backendHealthy
-    onTriggered: root.requestSnapshot()
+    running: true
+    onTriggered: {
+      if (!root.activeJob && root.backendQueue.length === 0)
+        root.enqueueBackend(["version-json"], "version", "")
+      root.requestSnapshot()
+    }
   }
 
   onShellChanged: probeAppLibrary()
