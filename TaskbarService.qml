@@ -1,0 +1,812 @@
+import QtQuick
+import Quickshell
+import Quickshell.Io
+import Quickshell.Hyprland
+import Quickshell.Wayland
+import "qml/AppMatcher.js" as AppMatcher
+
+Item {
+  id: root
+
+  property var shell: null
+  property var manifest: null
+
+  readonly property string pluginId: "dev.becerromarchy.workspace-taskbar"
+  readonly property int expectedProtocol: 4
+  readonly property string home: Quickshell.env("HOME")
+  readonly property string dataHome: Quickshell.env("XDG_DATA_HOME") || (home + "/.local/share")
+  readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || (home + "/.config")
+  readonly property string backendPath: dataHome + "/" + pluginId + "/bin/workspace-taskbar-backend"
+  readonly property string overridePath: configHome + "/" + pluginId + "/overrides.json"
+  readonly property string pinsPath: configHome + "/" + pluginId + "/pins.json"
+
+  property alias windows: windowModel
+  property alias pinnedLaunchers: pinnedLauncherModel
+  property bool backendHealthy: false
+  property string backendVersion: ""
+  property bool protocolCompatible: false
+  property bool appLibraryHealthy: false
+  property string appLibraryDiagnostic: "Not probed"
+  property string lastError: ""
+
+  property var appRows: []
+  property var appPresentationById: ({})
+  property var appOverrides: ({})
+  property var pinnedDesktopIds: []
+  property var minimizedByAddress: ({})
+  property var minimizedRecordsByAddress: ({})
+  property var busyByAddress: ({})
+  property var unmatchedProbeByAddress: ({})
+  property var orderByAddress: ({})
+  property int nextWindowOrder: 1
+  property var backendQueue: []
+  property var activeJob: null
+
+  ListModel { id: windowModel }
+  ListModel { id: pinnedLauncherModel }
+
+  function normalizedAddress(value) {
+    var v = String(value || "").trim().toLowerCase()
+    if (!v) return ""
+    return v.indexOf("0x") === 0 ? v : "0x" + v
+  }
+
+  function windowOrder(address) {
+    var normalized = normalizedAddress(address)
+    if (!normalized) return 0
+    if (orderByAddress[normalized] !== undefined) return Number(orderByAddress[normalized])
+
+    var next = ({})
+    for (var key in orderByAddress) next[key] = orderByAddress[key]
+    next[normalized] = nextWindowOrder
+    orderByAddress = next
+    nextWindowOrder += 1
+    return Number(next[normalized])
+  }
+
+  function pruneWindowOrder(rows) {
+    var keep = ({})
+    for (var i = 0; i < rows.length; i++) keep[rows[i].address] = true
+
+    var changed = false
+    var next = ({})
+    for (var address in orderByAddress) {
+      if (keep[address]) next[address] = orderByAddress[address]
+      else changed = true
+    }
+    if (changed) orderByAddress = next
+  }
+
+  function parseOverrides(rawText) {
+    var next = ({})
+    var raw = String(rawText || "").trim()
+    if (!raw) {
+      appOverrides = next
+      rebuildWindows()
+      return
+    }
+
+    try {
+      var parsed = JSON.parse(raw)
+      var source = parsed && parsed.matches ? parsed.matches : parsed
+      if (!source || typeof source !== "object" || source instanceof Array)
+        throw new Error("expected an object or { matches: { ... } }")
+
+      for (var key in source) {
+        var value = String(source[key] || "").trim()
+        if (!value) continue
+        next[String(key || "").trim().toLowerCase()] = value
+      }
+      appOverrides = next
+      if (lastError.indexOf("Invalid AppLibrary override file:") === 0) lastError = ""
+      rebuildWindows()
+    } catch (e) {
+      lastError = "Invalid AppLibrary override file: " + String(e)
+    }
+  }
+
+
+  function parsePins(rawText) {
+    const raw = String(rawText || "").trim()
+    if (!raw) {
+      root.pinnedDesktopIds = []
+      root.rebuildWindows()
+      root.rebuildPinnedLaunchers()
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(raw)
+      const source = parsed instanceof Array ? parsed : (parsed && parsed.desktopIds)
+      if (!(source instanceof Array)) throw new Error("expected an array or { desktopIds: [...] }")
+
+      const next = []
+      const seen = ({})
+      for (let i = 0; i < source.length; i++) {
+        const id = String(source[i] || "").trim()
+        if (!id || seen[id]) continue
+        seen[id] = true
+        next.push(id)
+      }
+
+      root.pinnedDesktopIds = next
+      if (root.lastError.indexOf("Invalid taskbar pins file:") === 0) root.lastError = ""
+      root.rebuildWindows()
+      root.rebuildPinnedLaunchers()
+    } catch (e) {
+      root.lastError = "Invalid taskbar pins file: " + String(e)
+    }
+  }
+
+  function savePins() {
+    const body = JSON.stringify({ desktopIds: root.pinnedDesktopIds }, null, 2) + "\n"
+    pinsFile.setText(body)
+  }
+
+  function pinIndex(desktopId) {
+    return root.pinnedDesktopIds.indexOf(String(desktopId || ""))
+  }
+
+  function isApplicationPinned(desktopId) {
+    return root.pinIndex(desktopId) >= 0
+  }
+
+  function pinApplication(desktopId) {
+    const id = String(desktopId || "").trim()
+    if (!id || !root.appPresentationById[id]) return false
+    if (root.isApplicationPinned(id)) return true
+
+    const next = root.pinnedDesktopIds.slice()
+    next.push(id)
+    root.pinnedDesktopIds = next
+    root.rebuildWindows()
+    root.rebuildPinnedLaunchers()
+    root.savePins()
+    return true
+  }
+
+  function unpinApplication(desktopId) {
+    const id = String(desktopId || "").trim()
+    const index = root.pinIndex(id)
+    if (index < 0) return true
+
+    const next = root.pinnedDesktopIds.slice()
+    next.splice(index, 1)
+    root.pinnedDesktopIds = next
+    root.rebuildWindows()
+    root.rebuildPinnedLaunchers()
+    root.savePins()
+    return true
+  }
+
+  function movePinnedApplication(desktopId, delta) {
+    const id = String(desktopId || "").trim()
+    const index = root.pinIndex(id)
+    const target = index + Number(delta || 0)
+    if (index < 0 || target < 0 || target >= root.pinnedDesktopIds.length || target === index) return false
+
+    const next = root.pinnedDesktopIds.slice()
+    const moved = next.splice(index, 1)[0]
+    next.splice(target, 0, moved)
+    root.pinnedDesktopIds = next
+    root.rebuildPinnedLaunchers()
+    root.savePins()
+    return true
+  }
+
+  function syncPinnedLauncherModel(rows) {
+    const wanted = ({})
+    for (let i = 0; i < rows.length; i++) wanted[rows[i].desktopId] = true
+
+    for (let i = pinnedLauncherModel.count - 1; i >= 0; i--) {
+      if (!wanted[String(pinnedLauncherModel.get(i).desktopId)]) pinnedLauncherModel.remove(i)
+    }
+
+    for (let targetIndex = 0; targetIndex < rows.length; targetIndex++) {
+      const row = rows[targetIndex]
+      let currentIndex = -1
+      for (let i = 0; i < pinnedLauncherModel.count; i++) {
+        if (String(pinnedLauncherModel.get(i).desktopId) === row.desktopId) {
+          currentIndex = i
+          break
+        }
+      }
+
+      if (currentIndex < 0) {
+        pinnedLauncherModel.insert(targetIndex, row)
+        continue
+      }
+
+      if (currentIndex !== targetIndex) pinnedLauncherModel.move(currentIndex, targetIndex, 1)
+      pinnedLauncherModel.setProperty(targetIndex, "appName", row.appName)
+      pinnedLauncherModel.setProperty(targetIndex, "iconSource", row.iconSource)
+      pinnedLauncherModel.setProperty(targetIndex, "pinIndex", row.pinIndex)
+    }
+  }
+
+  function rebuildPinnedLaunchers() {
+    const running = ({})
+    for (let i = 0; i < windowModel.count; i++) {
+      const id = String(windowModel.get(i).desktopId || "")
+      if (id) running[id] = true
+    }
+
+    const rows = []
+    for (let i = 0; i < root.pinnedDesktopIds.length; i++) {
+      const id = String(root.pinnedDesktopIds[i] || "")
+      if (!id || running[id]) continue
+      const presentation = root.appPresentationById[id]
+      if (!presentation || !presentation.name || !presentation.icon) continue
+      rows.push({
+        desktopId: id,
+        appName: String(presentation.name),
+        iconSource: String(presentation.icon),
+        pinIndex: i
+      })
+    }
+
+    root.syncPinnedLauncherModel(rows)
+  }
+
+  function probeAppLibrary() {
+    if (!shell) {
+      appLibraryHealthy = false
+      appLibraryDiagnostic = "Plugin shell facade unavailable"
+      rebuildWindows()
+      return
+    }
+
+    var lib = shell.appLibrary
+    if (!lib) {
+      appLibraryHealthy = false
+      appLibraryDiagnostic = "UPSTREAM_APP_LIBRARY_CAPABILITY_BROKEN: shell.appLibrary is null"
+      rebuildWindows()
+      return
+    }
+
+    try {
+      lib.refreshIcons()
+      var rows = lib.sortedEntries("") || []
+      if (rows.length === 0) throw new Error("AppLibrary returned no visible entries")
+
+      var presentations = ({})
+      var verified = false
+      for (var i = 0; i < rows.length; i++) {
+        var entry = rows[i] && rows[i].entry ? rows[i].entry : rows[i]
+        if (!entry) continue
+        var id = String(entry.id || "")
+        var name = String(lib.entryName(entry) || "")
+        var icon = String(lib.iconSource(entry.icon) || "")
+        if (id && name && icon) presentations[id] = { name: name, icon: icon }
+        if (name && icon) verified = true
+      }
+
+      if (!verified) throw new Error("entryName/iconSource probe failed for visible DesktopEntries")
+
+      appRows = rows
+      appPresentationById = presentations
+      appLibraryHealthy = true
+      appLibraryDiagnostic = "ok"
+      rebuildWindows()
+      rebuildPinnedLaunchers()
+    } catch (e) {
+      appLibraryHealthy = false
+      appLibraryDiagnostic = "UPSTREAM_APP_LIBRARY_CAPABILITY_BROKEN: " + String(e)
+      rebuildWindows()
+    }
+  }
+
+  function workspaceNameFrom(rawWorkspace, fallbackWorkspace) {
+    if (rawWorkspace && rawWorkspace.name !== undefined) return String(rawWorkspace.name || "")
+    if (fallbackWorkspace && fallbackWorkspace.name !== undefined) return String(fallbackWorkspace.name || "")
+    return ""
+  }
+
+  function infoForToplevel(toplevel) {
+    if (!toplevel) return null
+    var raw = toplevel.lastIpcObject || ({})
+    var address = normalizedAddress(toplevel.address || raw.address)
+    if (!address) return null
+    var wayland = toplevel.wayland
+    var workspaceName = workspaceNameFrom(raw.workspace, toplevel.workspace)
+
+    return {
+      address: address,
+      title: String(toplevel.title || raw.title || raw.initialTitle || ""),
+      initialTitle: String(raw.initialTitle || ""),
+      className: String(raw.class || ""),
+      initialClass: String(raw.initialClass || ""),
+      appId: String(wayland ? wayland.appId : ""),
+      workspace: raw.workspace && raw.workspace.id !== undefined
+        ? Number(raw.workspace.id)
+        : (toplevel.workspace ? Number(toplevel.workspace.id) : 0),
+      workspaceName: workspaceName,
+      specialWorkspace: workspaceName.indexOf("special:") === 0,
+      monitorId: raw.monitor !== undefined ? Number(raw.monitor) : -1,
+      active: !!toplevel.activated,
+      urgent: !!toplevel.urgent,
+      floating: !!raw.floating,
+      pinned: !!raw.pinned,
+      pseudo: !!raw.pseudo,
+      fullscreen: Number(raw.fullscreen || 0),
+      fullscreenClient: Number(raw.fullscreenClient || 0),
+      groupedCount: raw.grouped && raw.grouped.length !== undefined ? Number(raw.grouped.length) : 0,
+      popped: raw.tags && raw.tags.length !== undefined
+        ? Array.prototype.some.call(raw.tags, function(tag) { return String(tag || "").replace(/\*$/, "") === "pop" })
+        : false
+    }
+  }
+
+  function infoForRecord(record) {
+    if (!record) return null
+    var address = normalizedAddress(record.address)
+    if (!address) return null
+    var workspaceName = String(record.workspace_name || "")
+    return {
+      address: address,
+      title: String(record.title || record.initial_title || ""),
+      initialTitle: String(record.initial_title || ""),
+      className: String(record.class_name || ""),
+      initialClass: String(record.initial_class || ""),
+      appId: "",
+      workspace: Number(record.workspace_id || 0),
+      workspaceName: workspaceName,
+      specialWorkspace: workspaceName.indexOf("special:") === 0,
+      monitorId: -1,
+      active: false,
+      urgent: false,
+      floating: !!record.floating,
+      pinned: !!record.pinned,
+      pseudo: !!record.pseudo,
+      fullscreen: Number(record.fullscreen || 0),
+      fullscreenClient: Number(record.fullscreen_client || 0),
+      groupedCount: 0,
+      popped: false
+    }
+  }
+
+  function rowForInfo(info) {
+    if (!info) return null
+
+    var match = appLibraryHealthy ? AppMatcher.bestMatch(info, appRows, appOverrides) : null
+    var entry = match ? match.entry : null
+    var desktopId = entry ? String(entry.id || "") : ""
+    var presentation = desktopId ? appPresentationById[desktopId] : null
+    var matched = !!(entry && presentation && presentation.name && presentation.icon)
+    var appName = matched ? String(presentation.name) : "Unmatched application"
+    var icon = matched ? String(presentation.icon) : ""
+    var minimized = minimizedByAddress[info.address] === true
+    var restoreRecord = minimized ? minimizedRecordsByAddress[info.address] : null
+
+    // A live Hyprland client that is currently hidden reports the plugin's
+    // private special workspace. Present the original restore metadata instead
+    // so the taskbar never mistakes the implementation detail for user state.
+    var workspace = restoreRecord ? Number(restoreRecord.workspace_id || 0) : Number(info.workspace || 0)
+    var workspaceName = restoreRecord ? String(restoreRecord.workspace_name || "") : String(info.workspaceName || "")
+    var floating = restoreRecord ? !!restoreRecord.floating : !!info.floating
+    var pinned = restoreRecord ? !!restoreRecord.pinned : !!info.pinned
+    var pseudo = restoreRecord ? !!restoreRecord.pseudo : !!info.pseudo
+    var fullscreen = restoreRecord ? Number(restoreRecord.fullscreen || 0) : Number(info.fullscreen || 0)
+    var fullscreenClient = restoreRecord ? Number(restoreRecord.fullscreen_client || 0) : Number(info.fullscreenClient || 0)
+
+    return {
+      address: info.address,
+      title: info.title || info.initialTitle || appName,
+      desktopId: matched ? desktopId : "",
+      appName: appName,
+      iconSource: icon,
+      active: minimized ? false : !!info.active,
+      urgent: !!info.urgent,
+      minimized: minimized,
+      busy: busyByAddress[info.address] === true,
+      workspace: workspace,
+      workspaceName: workspaceName,
+      specialWorkspace: workspaceName.indexOf("special:") === 0,
+      monitorId: minimized ? -1 : Number(info.monitorId),
+      floating: floating,
+      pinned: pinned,
+      pseudo: pseudo,
+      fullscreen: fullscreen,
+      fullscreenClient: fullscreenClient,
+      groupedCount: Number(info.groupedCount || 0),
+      popped: !!info.popped,
+      matched: matched,
+      taskbarPinned: matched && root.isApplicationPinned(desktopId),
+      modelOrder: windowOrder(info.address)
+    }
+  }
+
+  function markUnmatchedForProbe(address) {
+    var normalized = normalizedAddress(address)
+    if (!normalized || unmatchedProbeByAddress[normalized]) return
+
+    var next = ({})
+    for (var key in unmatchedProbeByAddress) next[key] = unmatchedProbeByAddress[key]
+    next[normalized] = true
+    unmatchedProbeByAddress = next
+    appRefreshDebounce.restart()
+  }
+
+  function modelIndexForAddress(address) {
+    for (var i = 0; i < windowModel.count; i++)
+      if (String(windowModel.get(i).address) === String(address)) return i
+    return -1
+  }
+
+  function syncWindowModel(rows) {
+    var wanted = ({})
+    for (var i = 0; i < rows.length; i++) wanted[rows[i].address] = true
+
+    for (var removeIndex = windowModel.count - 1; removeIndex >= 0; removeIndex--) {
+      if (!wanted[String(windowModel.get(removeIndex).address)]) windowModel.remove(removeIndex)
+    }
+
+    var roles = [
+      "title", "desktopId", "appName", "iconSource", "active", "urgent", "minimized", "busy",
+      "workspace", "workspaceName", "specialWorkspace", "monitorId", "floating", "pinned", "pseudo",
+      "fullscreen", "fullscreenClient", "groupedCount", "popped", "matched", "taskbarPinned", "modelOrder"
+    ]
+
+    for (var targetIndex = 0; targetIndex < rows.length; targetIndex++) {
+      var row = rows[targetIndex]
+      var currentIndex = modelIndexForAddress(row.address)
+      if (currentIndex < 0) {
+        windowModel.insert(targetIndex, row)
+        continue
+      }
+
+      if (currentIndex !== targetIndex) windowModel.move(currentIndex, targetIndex, 1)
+      for (var roleIndex = 0; roleIndex < roles.length; roleIndex++) {
+        var role = roles[roleIndex]
+        windowModel.setProperty(targetIndex, role, row[role])
+      }
+    }
+  }
+
+  function rebuildWindows() {
+    var values = Hyprland.toplevels ? Hyprland.toplevels.values : []
+    var rows = []
+    var seen = ({})
+
+    for (var i = 0; i < values.length; i++) {
+      var info = infoForToplevel(values[i])
+      var row = rowForInfo(info)
+      if (!row) continue
+      seen[row.address] = true
+      rows.push(row)
+      if (!row.matched && appLibraryHealthy) markUnmatchedForProbe(row.address)
+    }
+
+    for (var address in minimizedRecordsByAddress) {
+      if (seen[address]) continue
+      var fallback = rowForInfo(infoForRecord(minimizedRecordsByAddress[address]))
+      if (fallback) {
+        rows.push(fallback)
+        if (!fallback.matched && appLibraryHealthy) markUnmatchedForProbe(fallback.address)
+      }
+    }
+
+    rows.sort(function(a, b) {
+      if (a.modelOrder !== b.modelOrder) return a.modelOrder - b.modelOrder
+      return a.address.localeCompare(b.address)
+    })
+
+    syncWindowModel(rows)
+    pruneWindowOrder(rows)
+    rebuildPinnedLaunchers()
+  }
+
+  function setBusy(address, value) {
+    var normalized = normalizedAddress(address)
+    if (!normalized) return
+
+    var next = ({})
+    for (var key in busyByAddress) next[key] = busyByAddress[key]
+    if (value) next[normalized] = true
+    else delete next[normalized]
+    busyByAddress = next
+    rebuildWindows()
+  }
+
+  function enqueueBackend(args, tag, address) {
+    backendQueue.push({ args: args, tag: tag || "", address: normalizedAddress(address) })
+    startNextBackendJob()
+  }
+
+  function requestSnapshot() {
+    if (!protocolCompatible || !backendHealthy) return
+    for (var i = 0; i < backendQueue.length; i++)
+      if (backendQueue[i].tag === "snapshot") return
+    if (activeJob && activeJob.tag === "snapshot") return
+    enqueueBackend(["snapshot"], "snapshot", "")
+  }
+
+  function startNextBackendJob() {
+    if (backendProc.running || activeJob || backendQueue.length === 0) return
+    activeJob = backendQueue.shift()
+    backendOutput.text = ""
+    backendProc.command = [backendPath].concat(activeJob.args)
+    backendProc.running = true
+  }
+
+  function applyMinimizedRecords(records) {
+    var flags = ({})
+    var details = ({})
+    var values = records instanceof Array ? records : []
+
+    for (var i = 0; i < values.length; i++) {
+      var address = normalizedAddress(values[i].address)
+      if (!address) continue
+      flags[address] = true
+      details[address] = values[i]
+    }
+
+    minimizedByAddress = flags
+    minimizedRecordsByAddress = details
+  }
+
+  function handleBackendObject(job, obj) {
+    if (!obj) return
+
+    if (obj.backendVersion !== undefined) backendVersion = String(obj.backendVersion)
+    if (obj.protocolVersion !== undefined) {
+      protocolCompatible = Number(obj.protocolVersion) === expectedProtocol
+      if (job && (job.tag === "version" || job.tag === "snapshot"))
+        backendHealthy = protocolCompatible && obj.ok !== false
+    }
+
+    if (obj.minimized !== undefined) applyMinimizedRecords(obj.minimized)
+    if (obj.error) lastError = String(obj.error)
+    else if (obj.ok === true) {
+      const persistentConfigError = lastError.indexOf("Invalid AppLibrary override file:") === 0
+        || lastError.indexOf("Invalid taskbar pins file:") === 0
+        || lastError.indexOf("Could not save taskbar pins:") === 0
+      if (!persistentConfigError) lastError = ""
+    }
+
+    if (job && job.address) setBusy(job.address, false)
+
+    Hyprland.refreshToplevels()
+    Qt.callLater(function() { root.rebuildWindows() })
+
+    if (job && job.tag === "action") snapshotDebounce.restart()
+  }
+
+  function backendAction(args, address) {
+    if (!backendHealthy || !protocolCompatible) {
+      lastError = "Backend unavailable or protocol mismatch. Run scripts/build-backend.sh"
+      return false
+    }
+
+    var normalized = normalizedAddress(address)
+    if (normalized && busyByAddress[normalized]) return false
+    if (normalized) setBusy(normalized, true)
+    enqueueBackend(args, "action", normalized)
+    return true
+  }
+
+  function toplevelFor(address) {
+    var normalized = normalizedAddress(address)
+    var values = Hyprland.toplevels ? Hyprland.toplevels.values : []
+    for (var i = 0; i < values.length; i++)
+      if (normalizedAddress(values[i].address) === normalized) return values[i]
+    return null
+  }
+
+  function isMinimized(address) {
+    return minimizedByAddress[normalizedAddress(address)] === true
+  }
+
+  function activateWindow(address) {
+    var normalized = normalizedAddress(address)
+    if (isMinimized(normalized)) return backendAction(["restore", normalized, "--focus"], normalized)
+
+    var toplevel = toplevelFor(normalized)
+    if (!toplevel) return false
+    if (toplevel.activated) return backendAction(["minimize", normalized], normalized)
+
+    if (toplevel.wayland) {
+      toplevel.wayland.activate()
+      snapshotDebounce.restart()
+      return true
+    }
+
+    return backendAction(["window-action", "focus", normalized], normalized)
+  }
+
+  function closeWindow(address) {
+    var normalized = normalizedAddress(address)
+    var toplevel = toplevelFor(normalized)
+    if (toplevel && toplevel.wayland) {
+      toplevel.wayland.close()
+      snapshotDebounce.restart()
+      return true
+    }
+    return backendAction(["window-action", "close", normalized], normalized)
+  }
+
+  function launchApplication(desktopId, appName) {
+    const id = String(desktopId || "").trim()
+    if (!id) return false
+    if (!shell || !shell.appLibrary || !appLibraryHealthy) {
+      lastError = "AppLibrary unavailable; cannot launch " + id
+      return false
+    }
+
+    try {
+      shell.appLibrary.launch(id, String(appName || id))
+      return true
+    } catch (e) {
+      lastError = "AppLibrary launch failed: " + String(e)
+      return false
+    }
+  }
+
+  function menuAction(action, address, argument) {
+    var normalized = normalizedAddress(address)
+    if (action === "minimize") return backendAction(["minimize", normalized], normalized)
+    if (action === "restore") return backendAction(["restore", normalized, "--focus"], normalized)
+    if (action === "close") return closeWindow(normalized)
+
+    var args = ["window-action", String(action), normalized]
+    if (argument !== undefined && argument !== null && String(argument).length > 0)
+      args.push(String(argument))
+    return backendAction(args, normalized)
+  }
+
+  function showDesktop() { return backendAction(["show-desktop-toggle"], "") }
+  function restoreLast() { return backendAction(["restore-last"], "") }
+  function restoreAll() { return backendAction(["restore-all"], "") }
+  function recover() { return backendAction(["recover"], "") }
+
+  QtObject {
+    id: backendOutput
+    property string text: ""
+  }
+
+  Process {
+    id: backendProc
+    stdout: SplitParser { onRead: function(line) { backendOutput.text += line } }
+    stderr: SplitParser { onRead: function(line) { root.lastError = line } }
+
+    onExited: function(code, status) {
+      var job = root.activeJob
+      root.activeJob = null
+      var obj = null
+
+      try {
+        obj = JSON.parse(backendOutput.text || "{}")
+      } catch (e) {
+        root.lastError = "Backend returned invalid JSON: " + String(e)
+        if (job && (job.tag === "version" || job.tag === "snapshot")) root.backendHealthy = false
+      }
+
+      if (code !== 0 && job && (job.tag === "version" || job.tag === "snapshot"))
+        root.backendHealthy = false
+
+      if (job && job.address && (!obj || code !== 0)) root.setBusy(job.address, false)
+      root.handleBackendObject(job, obj)
+      root.startNextBackendJob()
+    }
+  }
+
+  FileView {
+    id: pinsFile
+    path: root.pinsPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.parsePins(text())
+    onFileChanged: pinsFile.reload()
+    onLoadFailed: function() { root.parsePins("") }
+    onSaved: {
+      if (root.lastError.indexOf("Could not save taskbar pins:") === 0) root.lastError = ""
+    }
+    onSaveFailed: function(error) {
+      root.lastError = "Could not save taskbar pins: " + FileViewError.toString(error)
+    }
+  }
+
+  FileView {
+    path: root.overridePath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.parseOverrides(text())
+    onFileChanged: root.parseOverrides(text())
+    onLoadFailed: root.parseOverrides("")
+  }
+
+  Connections {
+    target: Hyprland.toplevels
+    function onValuesChanged() { root.rebuildWindows() }
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      rebuildDebounce.restart()
+      snapshotDebounce.restart()
+    }
+  }
+
+  Connections {
+    target: shell && shell.appLibrary ? shell.appLibrary : null
+    function onAppsChanged() { root.probeAppLibrary() }
+  }
+
+  Timer {
+    id: rebuildDebounce
+    interval: 40
+    repeat: false
+    onTriggered: {
+      Hyprland.refreshToplevels()
+      root.rebuildWindows()
+    }
+  }
+
+  Timer {
+    id: appRefreshDebounce
+    interval: 250
+    repeat: false
+    onTriggered: root.probeAppLibrary()
+  }
+
+  Timer {
+    id: snapshotDebounce
+    interval: 90
+    repeat: false
+    onTriggered: root.requestSnapshot()
+  }
+
+  Timer {
+    interval: 10000
+    repeat: true
+    running: root.backendHealthy
+    onTriggered: root.requestSnapshot()
+  }
+
+  onShellChanged: probeAppLibrary()
+
+  Component.onCompleted: {
+    probeAppLibrary()
+    enqueueBackend(["version-json"], "version", "")
+    enqueueBackend(["snapshot"], "snapshot", "")
+    rebuildWindows()
+  }
+
+  IpcHandler {
+    target: "workspace-taskbar"
+
+    function status(): string {
+      return JSON.stringify({
+        backendHealthy: root.backendHealthy,
+        backendVersion: root.backendVersion,
+        protocolCompatible: root.protocolCompatible,
+        appLibraryHealthy: root.appLibraryHealthy,
+        appLibraryDiagnostic: root.appLibraryDiagnostic,
+        windows: windowModel.count,
+        minimized: Object.keys(root.minimizedByAddress).length,
+        pinnedApplications: root.pinnedDesktopIds.length,
+        pinsPath: root.pinsPath,
+        overridePath: root.overridePath,
+        lastError: root.lastError
+      })
+    }
+
+    function refreshApps(): string {
+      root.probeAppLibrary()
+      return root.appLibraryHealthy ? "ok" : root.appLibraryDiagnostic
+    }
+
+    function model(): string {
+      var rows = []
+      for (var i = 0; i < windowModel.count; i++) rows.push(windowModel.get(i))
+      return JSON.stringify(rows)
+    }
+
+    function showDesktop(): string { return root.showDesktop() ? "ok" : "unavailable" }
+    function restoreLast(): string { return root.restoreLast() ? "ok" : "unavailable" }
+    function restoreAll(): string { return root.restoreAll() ? "ok" : "unavailable" }
+    function recover(): string { return root.recover() ? "ok" : "unavailable" }
+  }
+}

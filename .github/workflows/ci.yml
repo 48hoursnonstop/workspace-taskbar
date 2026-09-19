@@ -1,0 +1,21 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo generate-lockfile --manifest-path backend/Cargo.toml
+      - run: cargo fmt --manifest-path backend/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path backend/Cargo.toml --locked -- -D warnings
+      - run: cargo test --manifest-path backend/Cargo.toml --locked
+      - run: sudo apt-get update && sudo apt-get install -y jq shellcheck
+      - run: shellcheck scripts/*.sh tests/smoke/*.sh tests/acceptance/*.sh
+      - run: tests/smoke/static.sh

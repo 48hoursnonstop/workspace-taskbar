@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.becerromarchy.workspace-taskbar",
+  "name": "Workspace Taskbar",
+  "version": "0.13.7",
+  "author": "becerrOmarchy",
+  "description": "Per-window taskbar for Omarchy using the public plugin API and a one-shot Rust window-state helper.",
+  "kinds": [
+    "service",
+    "bar-widget",
+    "menu"
+  ],
+  "entryPoints": {
+    "service": "TaskbarService.qml",
+    "barWidget": "Taskbar.qml",
+    "menu": "CapabilityMenu.qml"
+  },
+  "barWidget": {
+    "displayName": "Workspace Taskbar",
+    "category": "Desktop",
+    "defaultSection": "left",
+    "allowMultiple": false
+  }
+}
