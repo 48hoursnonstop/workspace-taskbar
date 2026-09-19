@@ -1,11 +1,11 @@
--- dev.becerromarchy.workspace-taskbar managed Hyprbars config v1
+-- workspace-taskbar managed Hyprbars config v1
 -- Optional titlebar polish. The taskbar itself does not depend on Hyprbars.
 
 local home = os.getenv("HOME") or ""
 local xdg_data = os.getenv("XDG_DATA_HOME") or (home .. "/.local/share")
 local xdg_config = os.getenv("XDG_CONFIG_HOME") or (home .. "/.config")
-local action_helper = xdg_data .. "/dev.becerromarchy.workspace-taskbar/bin/workspace-taskbar-hyprbars-action"
-local override_path = xdg_config .. "/dev.becerromarchy.workspace-taskbar/hyprbars-overrides.lua"
+local action_helper = xdg_data .. "/workspace-taskbar/bin/workspace-taskbar-hyprbars-action"
+local override_path = xdg_config .. "/workspace-taskbar/hyprbars-overrides.lua"
 
 -- hyprpm plugins are loaded after the first config pass on a fresh session.
 -- The official Hyprbars plugin reloads Hyprland config when it initializes,

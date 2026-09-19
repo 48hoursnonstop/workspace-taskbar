@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-PLUGIN = 'dev.becerromarchy.workspace-taskbar'
+PLUGIN = 'workspace-taskbar'
 
 
 class Lifecycle(unittest.TestCase):
@@ -30,7 +30,7 @@ class Lifecycle(unittest.TestCase):
         self.bin.mkdir()
         self.executable(self.bin / 'omarchy', '''
 if [[ $1 == plugin && $2 == disable && ${MOCK_DISABLE_FAIL:-0} == 1 ]]; then exit 1; fi
-if [[ $1 == plugin && $2 == list ]]; then echo '[{"id":"dev.becerromarchy.workspace-taskbar","enabled":true}]'; fi
+if [[ $1 == plugin && $2 == list ]]; then echo '[{"id":"workspace-taskbar","enabled":true}]'; fi
 ''')
         self.executable(self.bin / 'omarchy-shell', 'echo ok')
         self.executable(self.bin / 'hyprctl', '''
@@ -45,7 +45,13 @@ esac
         self.executable(self.bin / 'pacman', "echo 'omarchy 4.0.4-1'")
         self.executable(self.bin / 'qs', "echo 'quickshell 0.3.1'")
         self.executable(self.bin / 'hyprpm', 'echo none')
+        services = self.base / 'omarchy/shell/services'
+        services.mkdir(parents=True)
+        (services / 'PluginShellApi.qml').write_text('function serviceFor(id) {}\n')
+        (services / 'PluginAppLibraryApi.qml').write_text(
+            'function sortedEntries(query) {}\nfunction iconSource(icon) {}\n')
         self.env = dict(os.environ, PATH=str(self.bin) + ':' + os.environ['PATH'],
+                        OMARCHY_PATH=str(self.base / 'omarchy'),
                         XDG_CONFIG_HOME=str(self.base / 'config'), XDG_DATA_HOME=str(self.base / 'data'),
                         XDG_STATE_HOME=str(self.base / 'state'), XDG_CACHE_HOME=str(self.base / 'cache'))
         self.backend = self.base / 'data' / PLUGIN / 'bin/workspace-taskbar-backend'

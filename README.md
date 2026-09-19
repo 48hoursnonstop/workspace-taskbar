@@ -2,7 +2,7 @@
 
 An Omarchy plugin with one button per window, launcher-matched app icons, minimize/restore, Show Desktop, pinned launchers, window previews and a keyboard-accessible context menu. It uses the built-in Omarchy bar and a small one-shot Rust helper.
 
-**0.14.0-rc.1** is a release candidate. See [verification](docs/verification/RESULTS.md) for executed checks and remaining graphical acceptance gates. Repository: [48hoursnonstop/workspace-taskbar](https://github.com/48hoursnonstop/workspace-taskbar).
+**0.14.0-rc.2** is a release candidate. See [verification](docs/verification/RESULTS.md) for executed checks and remaining graphical acceptance gates. Repository: [48hoursnonstop/workspace-taskbar](https://github.com/48hoursnonstop/workspace-taskbar).
 
 ## Requirements
 
@@ -19,18 +19,22 @@ Review the source first. Omarchy adds plugins disabled; build the helper before 
 
 ```bash
 omarchy plugin add https://github.com/48hoursnonstop/workspace-taskbar.git
-cd ~/.config/omarchy/plugins/dev.becerromarchy.workspace-taskbar
+cd ~/.config/omarchy/plugins/workspace-taskbar
 ./scripts/install.sh
 ```
 
+For the taskbar plus official Hyprbars buttons, use `./scripts/install.sh --with-hyprbars` instead. The installer places the widget after Workspaces.
+
+Upgrading from the old `dev.becerromarchy.workspace-taskbar` ID requires running that installation's `scripts/uninstall.sh` before adding this release. Saved preferences can then be copied from `~/.config/dev.becerromarchy.workspace-taskbar/` to `~/.config/workspace-taskbar/`.
+
 The installer validates the manifest, builds from committed `Cargo.lock`, checks the environment, enables the widget and runs doctor. It does not install system packages or require root. Missing dependencies are reported explicitly.
 
-For a source archive, extract its `dev.becerromarchy.workspace-taskbar/` directory under `~/.config/omarchy/plugins/`, then run the same installer. Keep an existing checkout backed up before replacing it. Archive installations do not have Git update history; use a Git checkout for Omarchy-managed updates.
+For a source archive, extract its `workspace-taskbar/` directory under `~/.config/omarchy/plugins/`, then run the same installer. Keep an existing checkout backed up before replacing it. Archive installations do not have Git update history; use a Git checkout for Omarchy-managed updates.
 
 Place the widget as desired:
 
 ```bash
-omarchy bar move dev.becerromarchy.workspace-taskbar --section left --after omarchy.workspaces
+omarchy bar move workspace-taskbar --section left --after omarchy.workspaces
 ```
 
 ## Use
@@ -47,7 +51,7 @@ Names and app icons come only from Omarchy AppLibrary. An unmatched app or a fai
 ## Update
 
 ```bash
-cd ~/.config/omarchy/plugins/dev.becerromarchy.workspace-taskbar
+cd ~/.config/omarchy/plugins/workspace-taskbar
 ./scripts/update.sh
 ```
 
@@ -70,7 +74,7 @@ omarchy-shell workspace-taskbar recover
 The shell recovery commands enqueue work; inspect `status` afterward for completion/errors. For synchronous recovery when the shell is unavailable:
 
 ```bash
-~/.local/share/dev.becerromarchy.workspace-taskbar/bin/workspace-taskbar-backend --protocol 5 recover
+~/.local/share/workspace-taskbar/bin/workspace-taskbar-backend --protocol 5 recover
 ```
 
 Transactions persist their original state before dispatch. Interrupted operations keep a pending record so recovery can finish. Closed/reused clients and manually moved completed records are reconciled. Orphaned windows on the private hidden workspace are rescued onto the active normal workspace; without their original record, their original workspace/geometry cannot be reconstructed. Corrupt or incompatible state is retained and reported; it is never silently discarded. Back up that file before repairing it.
@@ -90,7 +94,7 @@ Only official `hyprwm/hyprland-plugins`, managed by `hyprpm`, is supported. Setu
 ## Uninstall
 
 ```bash
-cd ~/.config/omarchy/plugins/dev.becerromarchy.workspace-taskbar
+cd ~/.config/omarchy/plugins/workspace-taskbar
 ./scripts/uninstall.sh
 ```
 
@@ -102,19 +106,19 @@ Missing backend, failed disable, unresolved records or failed compositor queries
 
 | Purpose | Location (XDG defaults) |
 |---|---|
-| Source | `~/.config/omarchy/plugins/dev.becerromarchy.workspace-taskbar/` |
-| Helper | `~/.local/share/dev.becerromarchy.workspace-taskbar/bin/` |
-| Restore journal | `~/.local/state/dev.becerromarchy.workspace-taskbar/restore-v1.json` |
-| Cargo output | `~/.cache/dev.becerromarchy.workspace-taskbar/cargo-target/` |
-| Session lock | `$XDG_RUNTIME_DIR/dev.becerromarchy.workspace-taskbar/transaction.lock` |
-| Pins / overrides | `~/.config/dev.becerromarchy.workspace-taskbar/` |
+| Source | `~/.config/omarchy/plugins/workspace-taskbar/` |
+| Helper | `~/.local/share/workspace-taskbar/bin/` |
+| Restore journal | `~/.local/state/workspace-taskbar/restore-v1.json` |
+| Cargo output | `~/.cache/workspace-taskbar/cargo-target/` |
+| Session lock | `$XDG_RUNTIME_DIR/workspace-taskbar/transaction.lock` |
+| Pins / overrides | `~/.config/workspace-taskbar/` |
 
 Runtime, cache and preferences honor their corresponding XDG variables. Generated files do not enter the recursively watched plugin tree. Matching overrides select an existing DesktopEntry, for example `{"matches":{"window-class":"desktop-entry-id"}}` in `overrides.json`.
 
 ## Development
 
 ```bash
-export CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/dev.becerromarchy.workspace-taskbar/cargo-target"
+export CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/workspace-taskbar/cargo-target"
 cargo fmt --manifest-path backend/Cargo.toml -- --check
 cargo clippy --manifest-path backend/Cargo.toml --locked -- -D warnings
 cargo test --manifest-path backend/Cargo.toml --locked

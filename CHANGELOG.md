@@ -1,3 +1,10 @@
+# 0.14.0-rc.2
+
+- Use `workspace-taskbar` as the plugin ID and source/runtime directory name.
+- Add `install.sh --with-hyprbars` for complete installation in one step.
+- Isolate doctor test fixtures from the host Omarchy installation.
+- For the old plugin ID, uninstall the previous release before adding this one.
+
 # 0.14.0-rc.1
 
 - Preserve pending minimize/restore transactions across dispatcher failures; recover orphaned hidden windows and reject unsafe cleanup.

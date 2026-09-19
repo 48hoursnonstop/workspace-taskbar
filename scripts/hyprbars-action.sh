@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PLUGIN_ID=dev.becerromarchy.workspace-taskbar
+PLUGIN_ID=workspace-taskbar
 : "${XDG_DATA_HOME:=$HOME/.local/share}"
 BIN="$XDG_DATA_HOME/$PLUGIN_ID/bin/workspace-taskbar-backend"
 

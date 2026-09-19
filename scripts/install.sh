@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PLUGIN_ID=dev.becerromarchy.workspace-taskbar
+PLUGIN_ID=workspace-taskbar
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 EXPECTED="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/$PLUGIN_ID"
+with_hyprbars=false
+case ${1:-} in
+  '') ;;
+  --with-hyprbars) with_hyprbars=true ;;
+  *) echo 'Usage: install.sh [--with-hyprbars]' >&2; exit 2 ;;
+esac
+(( $# <= 1 )) || { echo 'Usage: install.sh [--with-hyprbars]' >&2; exit 2; }
+if [[ -e "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/dev.becerromarchy.workspace-taskbar" ]]; then
+  echo 'Uninstall the previous dev.becerromarchy.workspace-taskbar installation first.' >&2
+  exit 2
+fi
 
 command -v omarchy >/dev/null || { echo "Omarchy CLI not found." >&2; exit 2; }
 
@@ -25,7 +36,8 @@ omarchy plugin validate "$ROOT"
 "$ROOT/scripts/build-backend.sh"
 "$ROOT/scripts/doctor.sh" --pre-enable
 omarchy-shell shell rescanPlugins
-omarchy plugin enable "$PLUGIN_ID" --section left --index 1
+omarchy plugin enable "$PLUGIN_ID" --section left --after omarchy.workspaces
+if $with_hyprbars; then "$ROOT/scripts/setup-hyprbars.sh"; fi
 "$ROOT/scripts/doctor.sh"
 cat <<MSG
 Optional official Hyprbars titlebar integration:

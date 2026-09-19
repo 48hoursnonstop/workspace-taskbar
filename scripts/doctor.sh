@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-PLUGIN_ID=dev.becerromarchy.workspace-taskbar
+PLUGIN_ID=workspace-taskbar
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 BIN="${XDG_DATA_HOME:-$HOME/.local/share}/$PLUGIN_ID/bin/workspace-taskbar-backend"
 OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
@@ -56,7 +56,7 @@ if [[ -f $hypr_config ]]; then
   helper="${XDG_DATA_HOME:-$HOME/.local/share}/$PLUGIN_ID/bin/workspace-taskbar-hyprbars-action"
   if [[ -x $helper ]]; then pass 'Hyprbars helper'; else fail 'Hyprbars helper' missing; fi
   if [[ $plugins != *hyprbars* ]]; then warn Hyprbars 'managed config present but decoration unavailable; core taskbar remains usable'; fi
-  for marker in '-- >>> dev.becerromarchy.workspace-taskbar:hyprbars >>>' '-- <<< dev.becerromarchy.workspace-taskbar:hyprbars <<<'; do
+  for marker in '-- >>> workspace-taskbar:hyprbars >>>' '-- <<< workspace-taskbar:hyprbars <<<'; do
     [[ $(grep -Fxc -- "$marker" "$CONFIG_HOME/hypr/hyprland.lua") == 1 ]] || fail 'Hyprbars hook' 'missing or duplicated marker'
   done
 fi

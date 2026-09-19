@@ -10,7 +10,7 @@ Item {
   property var shell: null
   property var manifest: null
 
-  readonly property string pluginId: "dev.becerromarchy.workspace-taskbar"
+  readonly property string pluginId: "workspace-taskbar"
   readonly property int expectedProtocol: 5
   readonly property string home: Quickshell.env("HOME")
   readonly property string dataHome: Quickshell.env("XDG_DATA_HOME") || (home + "/.local/share")

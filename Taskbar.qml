@@ -9,7 +9,7 @@ import "qml"
 BarWidget {
   id: root
 
-  moduleName: "dev.becerromarchy.workspace-taskbar"
+  moduleName: "workspace-taskbar"
 
   property var manifest: null
   readonly property bool menuOpen: root.service ? root.service.menuOpened : false

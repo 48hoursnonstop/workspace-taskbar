@@ -1,4 +1,10 @@
-# Verification — 0.14.0-rc.1
+# Verification
+
+## 0.14.0-rc.2
+
+Renamed the plugin and its XDG directories to `workspace-taskbar`; added the optional `install.sh --with-hyprbars` entry point. Manifest validation, static/matcher/Hyprbars smoke checks, all 8 lifecycle tests, all 14 backend transaction tests, backend compilation, ShellCheck and the QML lint gate passed again. Lifecycle tests now provide isolated Omarchy facade fixtures, fixing their dependence on an installed desktop in GitHub Actions. No new live desktop installation or VM run was performed for this rename.
+
+## 0.14.0-rc.1
 
 Date: 2026-09-19. Baseline: Omarchy package 4.0.4-1, Hyprland 0.56.2-2, Quickshell 0.3.1-1, Rust/Cargo 1.98.1, ShellCheck 0.11.0.
 

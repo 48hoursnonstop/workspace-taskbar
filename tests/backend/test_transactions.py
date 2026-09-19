@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 BINARY = Path(os.environ['TASKBAR_TEST_BINARY']).resolve()
-PLUGIN = 'dev.becerromarchy.workspace-taskbar'
+PLUGIN = 'workspace-taskbar'
 HIDDEN = 'special:becerromarchy-workspace-taskbar'
 
 

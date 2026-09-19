@@ -59,25 +59,25 @@ export PATH="$TMP/bin:$PATH"
 "$ROOT/scripts/setup-hyprbars.sh" >/dev/null
 
 test -f "$HOME/.config/hypr/workspace-taskbar-hyprbars.lua"
-test -x "$XDG_DATA_HOME/dev.becerromarchy.workspace-taskbar/bin/workspace-taskbar-hyprbars-action"
-test -f "$XDG_STATE_HOME/dev.becerromarchy.workspace-taskbar/hyprbars-ownership.env"
-grep -Fq 'REPO_ADDED_BY_PROJECT=1' "$XDG_STATE_HOME/dev.becerromarchy.workspace-taskbar/hyprbars-ownership.env"
-grep -Fq 'PLUGIN_ENABLED_BY_PROJECT=1' "$XDG_STATE_HOME/dev.becerromarchy.workspace-taskbar/hyprbars-ownership.env"
-[[ $(grep -Fc -- '-- >>> dev.becerromarchy.workspace-taskbar:hyprbars >>>' "$HOME/.config/hypr/hyprland.lua") == 1 ]]
+test -x "$XDG_DATA_HOME/workspace-taskbar/bin/workspace-taskbar-hyprbars-action"
+test -f "$XDG_STATE_HOME/workspace-taskbar/hyprbars-ownership.env"
+grep -Fq 'REPO_ADDED_BY_PROJECT=1' "$XDG_STATE_HOME/workspace-taskbar/hyprbars-ownership.env"
+grep -Fq 'PLUGIN_ENABLED_BY_PROJECT=1' "$XDG_STATE_HOME/workspace-taskbar/hyprbars-ownership.env"
+[[ $(grep -Fc -- '-- >>> workspace-taskbar:hyprbars >>>' "$HOME/.config/hypr/hyprland.lua") == 1 ]]
 
 # Idempotent runtime-only rerun must not need the build toolchain, duplicate
 # the import, or lose ownership. `meson` was only required for the first install.
 rm -f "$TMP/bin/meson"
 "$ROOT/scripts/setup-hyprbars.sh" >/dev/null
-[[ $(grep -Fc -- '-- >>> dev.becerromarchy.workspace-taskbar:hyprbars >>>' "$HOME/.config/hypr/hyprland.lua") == 1 ]]
-grep -Fq 'REPO_ADDED_BY_PROJECT=1' "$XDG_STATE_HOME/dev.becerromarchy.workspace-taskbar/hyprbars-ownership.env"
-grep -Fq 'PLUGIN_ENABLED_BY_PROJECT=1' "$XDG_STATE_HOME/dev.becerromarchy.workspace-taskbar/hyprbars-ownership.env"
+[[ $(grep -Fc -- '-- >>> workspace-taskbar:hyprbars >>>' "$HOME/.config/hypr/hyprland.lua") == 1 ]]
+grep -Fq 'REPO_ADDED_BY_PROJECT=1' "$XDG_STATE_HOME/workspace-taskbar/hyprbars-ownership.env"
+grep -Fq 'PLUGIN_ENABLED_BY_PROJECT=1' "$XDG_STATE_HOME/workspace-taskbar/hyprbars-ownership.env"
 
 "$ROOT/scripts/setup-hyprbars.sh" --remove >/dev/null
 if test -e "$HOME/.config/hypr/workspace-taskbar-hyprbars.lua"; then echo "Forbidden condition detected" >&2; exit 1; fi
-if test -e "$XDG_DATA_HOME/dev.becerromarchy.workspace-taskbar/bin/workspace-taskbar-hyprbars-action"; then echo "Forbidden condition detected" >&2; exit 1; fi
-if test -e "$XDG_STATE_HOME/dev.becerromarchy.workspace-taskbar/hyprbars-ownership.env"; then echo "Forbidden condition detected" >&2; exit 1; fi
-if grep -Fq -- '-- >>> dev.becerromarchy.workspace-taskbar:hyprbars >>>' "$HOME/.config/hypr/hyprland.lua"; then echo "Forbidden condition detected" >&2; exit 1; fi
+if test -e "$XDG_DATA_HOME/workspace-taskbar/bin/workspace-taskbar-hyprbars-action"; then echo "Forbidden condition detected" >&2; exit 1; fi
+if test -e "$XDG_STATE_HOME/workspace-taskbar/hyprbars-ownership.env"; then echo "Forbidden condition detected" >&2; exit 1; fi
+if grep -Fq -- '-- >>> workspace-taskbar:hyprbars >>>' "$HOME/.config/hypr/hyprland.lua"; then echo "Forbidden condition detected" >&2; exit 1; fi
 if test -e "$MOCK_STATE/repo"; then echo "Forbidden condition detected" >&2; exit 1; fi
 
 printf 'hyprbars setup smoke ok\n'

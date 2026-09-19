@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PLUGIN_ID=dev.becerromarchy.workspace-taskbar
+PLUGIN_ID=workspace-taskbar
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 OFFICIAL_REPO=https://github.com/hyprwm/hyprland-plugins
 REPO_NAME=hyprland-plugins
@@ -14,9 +14,9 @@ HYPR_CONFIG="$HYPR_DIR/workspace-taskbar-hyprbars.lua"
 HELPER_DEST="$XDG_DATA_HOME/$PLUGIN_ID/bin/workspace-taskbar-hyprbars-action"
 STATE_DIR="$XDG_STATE_HOME/$PLUGIN_ID"
 OWNERSHIP="$STATE_DIR/hyprbars-ownership.env"
-BEGIN_MARKER='-- >>> dev.becerromarchy.workspace-taskbar:hyprbars >>>'
-END_MARKER='-- <<< dev.becerromarchy.workspace-taskbar:hyprbars <<<'
-MANAGED_MARKER='-- dev.becerromarchy.workspace-taskbar managed Hyprbars config v1'
+BEGIN_MARKER='-- >>> workspace-taskbar:hyprbars >>>'
+END_MARKER='-- <<< workspace-taskbar:hyprbars <<<'
+MANAGED_MARKER='-- workspace-taskbar managed Hyprbars config v1'
 
 strip_ansi() {
   sed -E $'s/\x1B\\[[0-9;]*[mK]//g'

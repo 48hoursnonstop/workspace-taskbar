@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PLUGIN_ID=dev.becerromarchy.workspace-taskbar
+PLUGIN_ID=workspace-taskbar
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 
 printf 'Current plugin: %s\n' "$(jq -r .version "$ROOT/manifest.json")"

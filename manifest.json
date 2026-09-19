@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "id": "dev.becerromarchy.workspace-taskbar",
+  "id": "workspace-taskbar",
   "name": "Workspace Taskbar",
-  "version": "0.14.0-rc.1",
+  "version": "0.14.0-rc.2",
   "author": "becerrOmarchy",
   "description": "Per-window taskbar for Omarchy using the public plugin API and a one-shot Rust window-state helper.",
   "kinds": [

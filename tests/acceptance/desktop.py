@@ -12,7 +12,7 @@ if os.environ.get('TASKBAR_DISPOSABLE_VM') != '1':
 if subprocess.run(['systemd-detect-virt', '--vm'], capture_output=True).returncode:
     raise SystemExit('No VM detected. Do not run this suite on the development desktop.')
 
-PLUGIN = 'dev.becerromarchy.workspace-taskbar'
+PLUGIN = 'workspace-taskbar'
 backend = Path(os.environ.get('XDG_DATA_HOME', str(Path.home() / '.local/share'))) / PLUGIN / 'bin/workspace-taskbar-backend'
 processes = []
 titles = []
