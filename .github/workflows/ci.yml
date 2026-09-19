@@ -6,7 +6,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/taskbar-target
+      CARGO_TARGET_DIR: ${{ github.workspace }}/../taskbar-target
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
